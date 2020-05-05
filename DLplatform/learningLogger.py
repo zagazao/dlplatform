@@ -65,11 +65,11 @@ class LearningLogger():
         logFilePath = os.path.join(self._logpath, self._learnerPredLabelFile)
         with open(logFilePath, 'a') as output:
             for i in range(len(predictions)):
-                if isinstance(labels[i], int) and isinstance(predictions[i], int):
+                if isinstance(labels[i], (int, np.integer)) and isinstance(predictions[i], (int, np.integer)):
                     output.write('%.3f\t%s\t%s\n' % (time.time(), str(predictions[i]), str(labels[i])))
                 elif isinstance(labels[i], float) and isinstance(predictions[i], float):
                     output.write('%.3f\t%s\t%s\n' % (time.time(), str(predictions[i]), str(labels[i])))
-                elif isinstance(labels[i], int) and not isinstance(predictions[i], int):
+                elif isinstance(labels[i], (int, np.integer)) and not isinstance(predictions[i], (int, np.integer)):
                     output.write('%.3f\t%s\t%s\n' % (time.time(), ','.join(map(str, predictions[i])), str(labels[i])))
                 else:
                     output.write('%.3f\t%s\t%s\n' % (time.time(),
