@@ -321,9 +321,10 @@ class RabbitMQComm(Communicator):
             raise ValueError(error_text)
 
         _base_topic = 'newModel.'
+        _short_string_byte_limit = 255
 
-        # Compute avail bytes for identifier
-        _avail_bytes = 255 - utf8len(_base_topic)
+        # Compute available bytes for identifier
+        _avail_bytes = _short_string_byte_limit - utf8len(_base_topic)
         _id_string = '.'.join(identifiers)
         _id_string_size = utf8len(_id_string)
 
@@ -343,19 +344,20 @@ class RabbitMQComm(Communicator):
 
             # Check if _split_idx_guess is a valid split point
             while _id_string[_split_idx_guess] != '.':
+                # Otherwise fix it by going back
                 _split_idx_guess = _split_idx_guess - 1
 
-            # _topic = _id_string[:_split_idx_guess]
             _topics.append(_id_string[:_split_idx_guess])
 
             _id_string = _id_string[_split_idx_guess:]
-            # Cut off '.' since its included in base topic
+            # Cut off '.' since its already included in base topic
             if _id_string[0] == '.':
                 _id_string = _id_string[1:]
 
         message = pickle.dumps({'param': param,
                                 'flags': flags})
         message_size = sys.getsizeof(message)
+
         for _topic in _topics:
             topic = 'newModel.' + _topic
             self._publish(self._exchangeNodes, topic, message)
