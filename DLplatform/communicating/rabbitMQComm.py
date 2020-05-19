@@ -1,14 +1,12 @@
-from math import ceil
-
-from DLplatform.parameters import Parameters
-from DLplatform.communicating import Communicator
-
-from typing import List
-from threading import Thread
-from multiprocessing import Process
-import pika
 import pickle
 import sys
+from collections import deque
+from typing import List
+
+import pika
+
+from DLplatform.communicating import Communicator
+from DLplatform.parameters import Parameters
 
 
 def utf8len(s):
@@ -16,6 +14,35 @@ def utf8len(s):
     Helper function to calculate the number of bytes in a string.
     """
     return len(s.encode('utf-8'))
+
+
+def greedy(_ids):
+    # Avail bytes per message
+    _short_string_byte_limit = 255
+    _base_topic = 'newModel.'
+    _avail_bytes = _short_string_byte_limit - utf8len(_base_topic)
+    q = deque(_ids)
+
+    _avail_bytes_msg = _avail_bytes
+    topics = []
+    topic = ''
+    while q:
+        elem = q.popleft()
+        _id_len = utf8len(elem)
+        # Check if message fits in current batch
+        if _id_len + 1 < _avail_bytes_msg:
+            topic += elem + '.'
+        else:
+            topics.append(topic)
+            topic = elem
+            _avail_bytes_msg = _avail_bytes
+        _avail_bytes_msg -= _id_len
+    topics.append(topic)
+
+    # Not nice, but should work..
+    for idx, _t in enumerate(topics):
+        topics[idx] = _t.rstrip('.')
+    return topics
 
 
 class RabbitMQComm(Communicator):
@@ -323,42 +350,44 @@ class RabbitMQComm(Communicator):
         _base_topic = 'newModel.'
         _short_string_byte_limit = 255
 
+        topics = greedy(identifiers)
+
         # Compute available bytes for identifier
-        _avail_bytes = _short_string_byte_limit - utf8len(_base_topic)
-        _id_string = '.'.join(identifiers)
-        _id_string_size = utf8len(_id_string)
-
-        n_messages = ceil(_id_string_size / _avail_bytes)
-
-        _topics = []
-
-        for _m_idx in range(n_messages):
-            _id_string_size = utf8len(_id_string)
-
-            # Last message, we just pick the rest and continue
-            if _m_idx == n_messages - 1:
-                _topics.append(_id_string)
-                break
-
-            _split_idx_guess = min(_avail_bytes, _id_string_size)
-
-            # Check if _split_idx_guess is a valid split point
-            while _id_string[_split_idx_guess] != '.':
-                # Otherwise fix it by going back
-                _split_idx_guess = _split_idx_guess - 1
-
-            _topics.append(_id_string[:_split_idx_guess])
-
-            _id_string = _id_string[_split_idx_guess:]
-            # Cut off '.' since its already included in base topic
-            if _id_string[0] == '.':
-                _id_string = _id_string[1:]
+        # _avail_bytes = _short_string_byte_limit - utf8len(_base_topic)
+        # _id_string = '.'.join(identifiers)
+        # _id_string_size = utf8len(_id_string)
+        #
+        # n_messages = ceil(_id_string_size / _avail_bytes)
+        #
+        # _topics = []
+        #
+        # for _m_idx in range(n_messages):
+        #     _id_string_size = utf8len(_id_string)
+        #
+        #     # Last message, we just pick the rest and continue
+        #     if _m_idx == n_messages - 1:
+        #         _topics.append(_id_string)
+        #         break
+        #
+        #     _split_idx_guess = min(_avail_bytes, _id_string_size)
+        #
+        #     # Check if _split_idx_guess is a valid split point
+        #     while _id_string[_split_idx_guess] != '.':
+        #         # Otherwise fix it by going back
+        #         _split_idx_guess = _split_idx_guess - 1
+        #
+        #     _topics.append(_id_string[:_split_idx_guess])
+        #
+        #     _id_string = _id_string[_split_idx_guess:]
+        #     # Cut off '.' since its already included in base topic
+        #     if _id_string[0] == '.':
+        #         _id_string = _id_string[1:]
 
         message = pickle.dumps({'param': param,
                                 'flags': flags})
         message_size = sys.getsizeof(message)
 
-        for _topic in _topics:
+        for _topic in topics:
             topic = 'newModel.' + _topic
             self._publish(self._exchangeNodes, topic, message)
             self.learningLogger.logSendModelMessage(self._exchangeNodes, topic, message_size, 'send')
