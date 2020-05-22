@@ -1,11 +1,50 @@
-from DLplatform.parameters import Parameters
-from DLplatform.communicating import Communicator
-
-from typing import List
-import pika
 import pickle
 import sys
-import threading
+from collections import deque
+from math import ceil
+from typing import List
+
+import pika
+
+from DLplatform.communicating import Communicator
+from DLplatform.parameters import Parameters
+
+
+def utf8len(s):
+    """
+    Helper function to calculate the number of bytes in a string.
+    """
+    return len(s.encode('utf-8'))
+
+
+def greedy(_ids):
+    # Avail bytes per message
+    _short_string_byte_limit = 255
+    _base_topic = 'newModel.'
+    _avail_bytes = _short_string_byte_limit - utf8len(_base_topic)
+    q = deque(_ids)
+
+    _avail_bytes_msg = _avail_bytes
+    topics = []
+    topic = ''
+    while q:
+        elem = q.popleft()
+        _id_len = utf8len(elem)
+        # Check if message fits in current batch
+        if _id_len + 1 < _avail_bytes_msg:
+            topic += elem + '.'
+        else:
+            topics.append(topic)
+            topic = elem
+            _avail_bytes_msg = _avail_bytes
+        _avail_bytes_msg -= _id_len
+    topics.append(topic)
+
+    # Not nice, but should work..
+    for idx, _t in enumerate(topics):
+        topics[idx] = _t.rstrip('.')
+    return topics
+
 
 class RabbitMQComm(Communicator):
     '''
@@ -22,7 +61,7 @@ class RabbitMQComm(Communicator):
             (though it might lead to slower performance)
     '''
 
-    def __init__(self, hostname: str, port: int, user : str, password : str, uniqueId : str, name = "RabbitMQComm"):
+    def __init__(self, hostname: str, port: int, user: str, password: str, uniqueId: str, name="RabbitMQComm"):
         '''
         Initializes the BaseClass with name RabbitMQComm
         Also sets up parameters needed for connecting to the 
@@ -42,18 +81,18 @@ class RabbitMQComm(Communicator):
         user and password to connect to RabbitMQ on the host
         '''
 
-        Communicator.__init__(self, name = name)
+        Communicator.__init__(self, name=name)
 
-        self._port                      = port # 5672 is default
-        self._hostname                  = hostname # 'localhost' as the simplest
-        self._user                      = user
-        self._password                  = password
+        self._port = port  # 5672 is default
+        self._hostname = hostname  # 'localhost' as the simplest
+        self._user = user
+        self._password = password
         # we use uniqueId in order to allow running several experiments on one and the same
         # rabbitMQ instance - the messages would not be mixed up then, because channels
         # have this uniqueId, that is the PID of the experiment process
-        self._exchangeCoordinator       = 'coordinator' + uniqueId
-        self._exchangeNodes             = 'nodes' + uniqueId
-        self._threads                   = []
+        self._exchangeCoordinator = 'coordinator' + uniqueId
+        self._exchangeNodes = 'nodes' + uniqueId
+        self._threads = []
         self._setupPublishConnection()
 
     '''
@@ -75,14 +114,14 @@ class RabbitMQComm(Communicator):
         if '_publishConnection' in d and d['_publishConnection'] == "reconnect_required":
             credentials = pika.PlainCredentials(d['_user'], d['_password'])
             d['_publishConnection'] = pika.BlockingConnection(pika.ConnectionParameters(host=d['_hostname'],
-                                        port=d['_port'], credentials=credentials, blocked_connection_timeout=None,
-                                        socket_timeout=None, heartbeat=0))
+                                                                                        port=d['_port'], credentials=credentials, blocked_connection_timeout=None,
+                                                                                        socket_timeout=None, heartbeat=0))
             d['_publishChannel'] = d['_publishConnection'].channel()
             d['_publishChannel'].exchange_declare(exchange=d['_exchangeCoordinator'], exchange_type='topic')
             d['_publishChannel'].exchange_declare(exchange=d['_exchangeNodes'], exchange_type='topic')
         self.__dict__.update(d)
 
-    def initiate(self, exchange : str, topics : List[str]):
+    def initiate(self, exchange: str, topics: List[str]):
         '''
         Sets the needed exchange name and topics to listen to.
         For worker it is Nodes exchange and topics with its id
@@ -107,9 +146,9 @@ class RabbitMQComm(Communicator):
         '''
 
         credentials = pika.PlainCredentials(self._user, self._password)
-        return pika.BlockingConnection(pika.ConnectionParameters(host = self._hostname,
-                    port = self._port, credentials = credentials, blocked_connection_timeout = None,
-                    socket_timeout = None, heartbeat = 0))
+        return pika.BlockingConnection(pika.ConnectionParameters(host=self._hostname,
+                                                                 port=self._port, credentials=credentials, blocked_connection_timeout=None,
+                                                                 socket_timeout=None, heartbeat=0))
 
     def _setupPublishConnection(self):
         '''
@@ -117,8 +156,8 @@ class RabbitMQComm(Communicator):
         Declares to exchanges: for Nodes and Coordinator, each instance of communicator
         will know, which of the exchanges should be used for publishing
         '''
-        self._publishConnection         = self.connect()
-        self._publishChannel            = self._publishConnection.channel()
+        self._publishConnection = self.connect()
+        self._publishChannel = self._publishConnection.channel()
 
         self._publishChannel.exchange_declare(exchange=self._exchangeCoordinator, exchange_type='topic')
         self._publishChannel.exchange_declare(exchange=self._exchangeNodes, exchange_type='topic')
@@ -157,7 +196,7 @@ class RabbitMQComm(Communicator):
             self._setupPublishConnection()
             self._publishChannel.basic_publish(exchange=exchange, routing_key=topic, body=message)
 
-    def sendViolation(self, identifier : str, param : Parameters):
+    def sendViolation(self, identifier: str, param: Parameters):
         '''
         Publish message about violation
         Called from a worker with violation and published to coordinator
@@ -189,14 +228,14 @@ class RabbitMQComm(Communicator):
             self.error(error_text)
             raise ValueError(error_text)
 
-        message = pickle.dumps({'id' : identifier, 'param' : param})
+        message = pickle.dumps({'id': identifier, 'param': param})
         message_size = sys.getsizeof(message)
         topic = 'violation'
         self._publish(self._exchangeCoordinator, topic, message)
         self.info("Sent violation message to coordinator")
         self.learningLogger.logViolationMessage(self._exchangeCoordinator, topic, identifier, message_size, 'send')
 
-    def sendRegistration(self, identifier : str, param : Parameters):
+    def sendRegistration(self, identifier: str, param: Parameters):
         '''
         Publish message that will register a new node on coordinator
         Called from a newly connected worker and published to coordinator
@@ -223,12 +262,12 @@ class RabbitMQComm(Communicator):
             raise ValueError(error_text)
 
         topic = 'registration'
-        message = pickle.dumps({'id' : identifier, 'param' : param})
+        message = pickle.dumps({'id': identifier, 'param': param})
         message_size = sys.getsizeof(message)
         self._publish(self._exchangeCoordinator, topic, message)
         self.learningLogger.logRegistrationMessage(self._exchangeCoordinator, topic, identifier, message_size, 'send')
 
-    def sendDeregistration(self, identifier : str, param : Parameters):
+    def sendDeregistration(self, identifier: str, param: Parameters):
         '''
         When a node finished according to the stopping criterion,
         it send the deregistration message to coordinator
@@ -244,12 +283,12 @@ class RabbitMQComm(Communicator):
             raise ValueError(error_text)
 
         topic = 'deregistration'
-        message = pickle.dumps({'id' : identifier, 'param' : param})
+        message = pickle.dumps({'id': identifier, 'param': param})
         message_size = sys.getsizeof(message)
         self._publish(self._exchangeCoordinator, topic, message)
         self.learningLogger.logRegistrationMessage(self._exchangeCoordinator, topic, identifier, message_size, 'send')
 
-    def sendParameters(self, identifier : str, param : Parameters):
+    def sendParameters(self, identifier: str, param: Parameters):
         '''
         Publish message with parametres
         Called from a worker that was requested for its parameters
@@ -283,12 +322,12 @@ class RabbitMQComm(Communicator):
             raise ValueError(error_text)
 
         topic = 'balancing'
-        message = pickle.dumps({'id' : identifier, 'param' : param})
+        message = pickle.dumps({'id': identifier, 'param': param})
         message_size = sys.getsizeof(message)
         self._publish(self._exchangeCoordinator, topic, message)
         self.learningLogger.logBalancingMessage(self._exchangeCoordinator, topic, identifier, message_size, 'send')
 
-    def sendBalancingRequest(self, identifier : str):
+    def sendBalancingRequest(self, identifier: str):
         '''
         Publish message to query the worker for its current parameters
         Called from coordinator while balancing process and published to nodes
@@ -318,7 +357,7 @@ class RabbitMQComm(Communicator):
         self._publish(self._exchangeNodes, topic, '')
         self.learningLogger.logBalancingRequestMessage(self._exchangeNodes, topic, identifier, message_size, 'send')
 
-    def sendAveragedModel(self, identifiers : List[str], param : Parameters, flags: dict):
+    def sendAveragedModel(self, identifiers: List[str], param: Parameters, flags: dict):
         '''
         Publish message to send an averaged model to the nodes
         Called from coordinator after balancing process and published to nodes
@@ -360,13 +399,58 @@ class RabbitMQComm(Communicator):
             self.error(error_text)
             raise ValueError(error_text)
 
-        topic = 'newModel.' + '.'.join(identifiers)
-        message = pickle.dumps({'param' : param, 'flags' : flags})
-        message_size = sys.getsizeof(message)
-        self._publish(self._exchangeNodes, topic, message)
-        self.learningLogger.logSendModelMessage(self._exchangeNodes, topic, message_size, 'send')
+        _base_topic = 'newModel.'
+        _short_string_byte_limit = 255
 
-    def setPort(self, port: int) :
+        # topics = greedy(identifiers)
+
+        # Compute available bytes for identifier
+        _avail_bytes = _short_string_byte_limit - utf8len(_base_topic)
+        _id_string = '.'.join(identifiers)
+        _id_string_size = utf8len(_id_string)
+
+        n_messages = ceil(_id_string_size / _avail_bytes)
+
+        _topics = []
+
+        for _m_idx in range(n_messages):
+            _id_string_size = utf8len(_id_string)
+
+            # Last message, we just pick the rest and continue
+            if _m_idx == n_messages - 1:
+                _topics.append(_id_string)
+                break
+
+            _split_idx_guess = min(_avail_bytes, _id_string_size)
+
+            # Check if _split_idx_guess is a valid split point
+            while _id_string[_split_idx_guess] != '.':
+                # Otherwise fix it by going back
+                _split_idx_guess = _split_idx_guess - 1
+
+            _topics.append(_id_string[:_split_idx_guess])
+
+            _id_string = _id_string[_split_idx_guess:]
+            # Cut off '.' since its already included in base topic
+            if _id_string[0] == '.':
+                _id_string = _id_string[1:]
+
+        message = pickle.dumps({'param': param,
+                                'flags': flags})
+        message_size = sys.getsizeof(message)
+
+        for _topic in _topics:
+            topic = 'newModel.' + _topic
+            self._publish(self._exchangeNodes, topic, message)
+            self.learningLogger.logSendModelMessage(self._exchangeNodes, topic, message_size, 'send')
+
+        # topic = 'newModel.' + '.'.join(identifiers)
+        # message = pickle.dumps({'param': param, 'flags': flags})
+        # message_size = sys.getsizeof(message)
+        # self._publish(self._exchangeNodes, topic, message)
+        # self.learningLogger.logSendModelMessage(self._exchangeNodes, topic, message_size, 'send')
+
+    def setPort(self, port: int):
         '''
         Setter for the port of the communication server
 
