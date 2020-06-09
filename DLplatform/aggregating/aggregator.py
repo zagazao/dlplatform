@@ -1,8 +1,9 @@
-from DLplatform.baseClass import baseClass
-
 from abc import ABCMeta
 from typing import List
+
+from DLplatform.baseClass import baseClass
 from DLplatform.parameters import Parameters
+
 
 class Aggregator(baseClass):
     '''
@@ -14,7 +15,7 @@ class Aggregator(baseClass):
 
     __metaclass__ = ABCMeta
 
-    def __init__(self, name = "Aggregator"):
+    def __init__(self, name="Aggregator"):
         '''
         Initialize BaseClass parent with name Aggregator
 
@@ -22,9 +23,9 @@ class Aggregator(baseClass):
         -------
         None
         '''
-        baseClass.__init__(self, name = name)
+        baseClass.__init__(self, name=name)
 
-    def __call__(self, params : List[Parameters]) -> Parameters:
+    def __call__(self, params: List[Parameters]) -> Parameters:
         '''
         Aggregator call method, combines Parameters into one model's Parameters
         Specific implementation is different for different approaches.
@@ -40,4 +41,6 @@ class Aggregator(baseClass):
         '''
 
         raise NotImplementedError
-        
+
+    def __str__(self):
+        return self.__class__.__name__
